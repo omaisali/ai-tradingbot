@@ -1,40 +1,42 @@
-import { startOfDay, eachDayOfInterval, parseISO, addMinutes } from 'date-fns';
-import type { MarketData } from '../../db/database';
-import { getExistingDataRange, storeMarketData } from '../database/marketDataRepository';
+import { startOfDay, eachDayOfInterval, addMinutes } from 'date-fns';
+import type { MarketData } from './types';
+import { marketDataRepository } from '../../db/repositories/marketDataRepository';
 import { simulateHistoricalPrice } from './priceSimulator';
-import { ensureDatabaseConnection } from '../../db/initDatabase';
 
-export async function findMissingDateRanges(symbol: string, startDate: Date, endDate: Date) {
+export async function findMissingDateRanges(
+  symbol: string,
+  startDate: Date,
+  endDate: Date
+): Promise<Array<{ start: Date; end: Date }>> {
   try {
-    await ensureDatabaseConnection();
-
-    const { oldestData, newestData } = await getExistingDataRange(symbol);
+    const existingData = await marketDataRepository.getBySymbol(symbol);
     
-    // If no data exists, return the entire date range
-    if (!oldestData || !newestData) {
+    if (!existingData.length) {
       return [{
         start: startDate,
         end: endDate
       }];
     }
 
-    const ranges = [];
-    const effectiveStartDate = startOfDay(startDate);
-    const effectiveEndDate = startOfDay(endDate);
+    const timestamps = existingData.map(d => d.timestamp).sort((a, b) => a - b);
+    const ranges: Array<{ start: Date; end: Date }> = [];
+    let currentDate = startDate;
 
-    // Check if we need data before the oldest record
-    if (effectiveStartDate < oldestData.timestamp) {
-      ranges.push({
-        start: effectiveStartDate,
-        end: oldestData.timestamp
-      });
+    for (const timestamp of timestamps) {
+      const date = new Date(timestamp);
+      if (currentDate < date) {
+        ranges.push({
+          start: currentDate,
+          end: date
+        });
+      }
+      currentDate = new Date(date.getTime() + 60000); // Add 1 minute
     }
 
-    // Check if we need data after the newest record
-    if (effectiveEndDate > newestData.timestamp) {
+    if (currentDate < endDate) {
       ranges.push({
-        start: newestData.timestamp,
-        end: effectiveEndDate
+        start: currentDate,
+        end: endDate
       });
     }
 
@@ -49,40 +51,42 @@ export async function processMissingData(
   symbol: string,
   missingRanges: Array<{ start: Date; end: Date }>,
   onProgress: (progress: number, currentDate: Date) => void
-) {
+): Promise<void> {
   try {
-    await ensureDatabaseConnection();
-
+    const batchSize = 100;
     let totalProcessed = 0;
     const totalRanges = missingRanges.length;
 
     for (const range of missingRanges) {
+      const dataPoints: MarketData[] = [];
       let currentDate = range.start;
-      const batchSize = 100;
-      const dataPoints = [];
 
       while (currentDate <= range.end) {
         // Generate data points for every minute
         for (let i = 0; i < 1440 && currentDate <= range.end; i++) {
           dataPoints.push({
-            timestamp: new Date(currentDate),
+            timestamp: currentDate.getTime(),
             symbol,
             price: simulateHistoricalPrice(currentDate),
-            volume: 100000 + Math.random() * 900000
+            volume: Math.random() * 1000000
           });
           currentDate = addMinutes(currentDate, 1);
         }
 
-        // Store in batches
-        if (dataPoints.length >= batchSize || currentDate > range.end) {
-          await storeMarketData(dataPoints.splice(0, batchSize));
+        if (dataPoints.length >= batchSize) {
+          await marketDataRepository.addBatch(dataPoints.splice(0, batchSize));
           const progress = (totalProcessed / totalRanges) * 100;
           onProgress(progress, currentDate);
-          await new Promise(resolve => setTimeout(resolve, 10)); // Prevent UI blocking
+          await new Promise(resolve => setTimeout(resolve, 10));
         }
       }
 
+      if (dataPoints.length > 0) {
+        await marketDataRepository.addBatch(dataPoints);
+      }
+
       totalProcessed++;
+      onProgress((totalProcessed / totalRanges) * 100, currentDate);
     }
   } catch (error) {
     console.error('Error processing missing data:', error);

@@ -1,20 +1,77 @@
-import React from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
+import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { db } from '../db/database';
 import { LineChart, ArrowUpCircle, ArrowDownCircle, Wallet } from 'lucide-react';
-import { PriceChart } from './PriceChart';
+import { marketDataRepository } from '../db/repositories/marketDataRepository';
+import { TradingViewChart } from './TradingViewChart';
+import type { MarketData } from '../db/types/marketData';
 
 interface MarketDataVisualizationProps {
   compact?: boolean;
 }
 
 export function MarketDataVisualization({ compact = false }: MarketDataVisualizationProps) {
-  const marketData = useLiveQuery(
-    () => db.marketData.orderBy('timestamp').reverse().limit(100).toArray()
-  );
+  const [marketData, setMarketData] = useState<MarketData[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!marketData || marketData.length === 0) {
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        // Get last 10 years of data
+        const endDate = new Date();
+        const startDate = new Date(endDate.getFullYear() - 10, endDate.getMonth(), endDate.getDate());
+        
+        const data = await marketDataRepository.getBySymbol(
+          'BTC/USDT',
+          startDate.getTime(),
+          endDate.getTime()
+        );
+
+        // Sort data by timestamp in ascending order
+        const sortedData = [...data].sort((a, b) => a.timestamp - b.timestamp);
+        setMarketData(sortedData);
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Failed to load market data:', error);
+        setError('Failed to load market data');
+        setIsLoading(false);
+      }
+    };
+    
+    loadData();
+    
+    // Refresh data every 5 seconds
+    const interval = setInterval(loadData, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <LineChart className="w-5 h-5 text-blue-500" />
+          <h2 className="text-xl font-semibold dark:text-white">Market Data</h2>
+        </div>
+        <div className="flex items-center justify-center h-[200px]">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <LineChart className="w-5 h-5 text-red-500" />
+          <h2 className="text-xl font-semibold dark:text-white">Market Data</h2>
+        </div>
+        <p className="text-red-500 dark:text-red-400">{error}</p>
+      </div>
+    );
+  }
+
+  if (!marketData.length) {
     return (
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
         <div className="flex items-center gap-2 mb-4">
@@ -26,11 +83,12 @@ export function MarketDataVisualization({ compact = false }: MarketDataVisualiza
     );
   }
 
-  const latestPrice = marketData[0].price;
-  const previousPrice = marketData[1]?.price ?? latestPrice;
-  const priceChange = ((latestPrice - previousPrice) / previousPrice) * 100;
-  const isPositive = priceChange >= 0;
-  const volume24h = marketData.slice(0, 24).reduce((sum, data) => sum + data.volume, 0);
+  const latestData = marketData[marketData.length - 1];
+  const previousData = marketData[marketData.length - 2] || latestData;
+  const priceChange = ((latestData.price - previousData.price) / previousData.price) * 100;
+  const volume24h = marketData
+    .slice(-24)
+    .reduce((sum, data) => sum + data.volume, 0);
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
@@ -41,13 +99,13 @@ export function MarketDataVisualization({ compact = false }: MarketDataVisualiza
             <h2 className="text-2xl font-bold dark:text-white">BTC/USDT</h2>
           </div>
           <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 px-3 py-1 rounded-full">
-            {isPositive ? (
+            {priceChange >= 0 ? (
               <ArrowUpCircle className="w-5 h-5 text-green-500" />
             ) : (
               <ArrowDownCircle className="w-5 h-5 text-red-500" />
             )}
-            <span className={`font-semibold ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
-              {priceChange.toFixed(2)}%
+            <span className={`font-semibold ${priceChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+              {Math.abs(priceChange).toFixed(2)}%
             </span>
           </div>
         </div>
@@ -55,7 +113,7 @@ export function MarketDataVisualization({ compact = false }: MarketDataVisualiza
         <div className="flex items-center gap-6">
           <div>
             <p className="text-sm text-gray-500 dark:text-gray-400">Current Price</p>
-            <p className="text-xl font-bold dark:text-white">${latestPrice.toLocaleString()}</p>
+            <p className="text-xl font-bold dark:text-white">${latestData.price.toLocaleString()}</p>
           </div>
           <div>
             <p className="text-sm text-gray-500 dark:text-gray-400">24h Volume</p>
@@ -70,7 +128,15 @@ export function MarketDataVisualization({ compact = false }: MarketDataVisualiza
       </div>
 
       <div className={`${compact ? 'h-[300px]' : 'h-[500px]'} mb-6`}>
-        <PriceChart data={marketData} />
+        <TradingViewChart 
+          data={marketData.map(d => ({
+            symbol: d.symbol,
+            price: d.price,
+            volume: d.volume,
+            timestamp: d.timestamp
+          }))}
+          height={compact ? 300 : 500}
+        />
       </div>
 
       {!compact && (
@@ -85,11 +151,11 @@ export function MarketDataVisualization({ compact = false }: MarketDataVisualiza
               </tr>
             </thead>
             <tbody>
-              {marketData.slice(0, 10).map((data, index) => {
-                const prevPrice = marketData[index + 1]?.price ?? data.price;
-                const change = ((data.price - prevPrice) / prevPrice) * 100;
+              {marketData.slice(-10).reverse().map((data, index, arr) => {
+                const prevData = arr[index + 1] || data;
+                const change = ((data.price - prevData.price) / prevData.price) * 100;
                 return (
-                  <tr key={data.id} className="border-b dark:border-gray-700">
+                  <tr key={data.timestamp} className="border-b dark:border-gray-700">
                     <td className="py-3 text-gray-900 dark:text-gray-300">
                       {format(data.timestamp, 'HH:mm:ss')}
                     </td>

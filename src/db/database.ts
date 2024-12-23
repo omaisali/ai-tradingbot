@@ -1,37 +1,73 @@
-import Dexie from 'dexie';
-import { DB_CONFIG } from './config';
-import type { DatabaseSchema } from './types';
-import { validateMarketData, validateTrade } from './utils/validators';
+import initSqlJs, { Database } from 'sql.js';
+import { SQL_SCHEMA } from './config/constants';
+import { DatabaseError } from './errors/database';
 
-class TradingDatabase extends Dexie {
-  trades!: DatabaseSchema['trades'];
-  marketData!: DatabaseSchema['marketData'];
+export let db: Database | null = null; // Export the db variable
 
-  constructor() {
-    super(DB_CONFIG.name);
-    
-    this.version(DB_CONFIG.version).stores(DB_CONFIG.stores);
+// let db: Database | null = null;
+let isInitialized = false;
+let initializationPromise: Promise<void> | null = null;
 
-    // Add hooks for data validation
-    this.marketData.hook('creating', (primKey, obj) => {
-      return validateMarketData(obj);
-    });
-
-    this.trades.hook('creating', (primKey, obj) => {
-      return validateTrade(obj);
-    });
+export async function initializeDatabase(): Promise<void> {
+  console.log('🔄 Starting database initialization...');
+  
+  if (isInitialized && db) {
+    console.log('✅ Database already initialized');
+    return;
   }
 
-  async clearAllData(): Promise<void> {
-    await this.transaction('rw', [this.marketData, this.trades], async () => {
-      await Promise.all([
-        this.marketData.clear(),
-        this.trades.clear()
-      ]);
-    });
+  if (initializationPromise) {
+    console.log('⏳ Waiting for existing initialization...');
+    return initializationPromise;
+  }
+
+  initializationPromise = (async () => {
+    try {
+      console.log('🔄 Loading SQL.js...');
+      const SQL = await initSqlJs({
+        locateFile: file => `https://sql.js.org/dist/${file}`
+      });
+
+      console.log('🔄 Creating database...');
+      db = new SQL.Database();
+
+      console.log('🔄 Creating tables...');
+      Object.values(SQL_SCHEMA).forEach(schema => {
+        db!.run(schema);
+      });
+
+      isInitialized = true;
+      console.log('✅ Database initialization complete');
+    } catch (error) {
+      console.error('❌ Database initialization failed:', error);
+      closeDatabase();
+      throw new DatabaseError('Failed to initialize database', error as Error);
+    } finally {
+      initializationPromise = null;
+    }
+  })();
+
+  return initializationPromise;
+}
+
+export function getDatabase(): Database {
+  if (!db || !isInitialized) {
+    throw new DatabaseError('Database not initialized. Call initializeDatabase() first.');
+  }
+  return db;
+}
+
+export function closeDatabase(): void {
+  if (db) {
+    db.close();
+    db = null;
+    isInitialized = false;
+    initializationPromise = null;
   }
 }
 
-const db = new TradingDatabase();
-
-export { db };
+export async function ensureDatabaseConnection(): Promise<void> {
+  if (!isInitialized || !db) {
+    await initializeDatabase();
+  }
+}

@@ -2,8 +2,7 @@ import React from 'react';
 import { Activity, Brain, LineChart, Loader2, Calendar, CheckCircle } from 'lucide-react';
 import { BotState } from '../types/config';
 import { DataRangeVisualization } from './DataRangeVisualization';
-import type { HistoricalDataProgress } from '../services/binanceService';
-import { subYears } from 'date-fns';
+import type { HistoricalDataProgress } from '../services/market/types';
 
 interface ProcessVisualizationProps {
   state: BotState;
@@ -38,42 +37,24 @@ export function ProcessVisualization({ state }: ProcessVisualizationProps) {
   const renderHistoricalProgress = (details?: HistoricalDataProgress) => {
     if (!details) return null;
 
-    const startDate = subYears(new Date(), 5);
-    const endDate = new Date();
-
-    // Simulate existing and fetching ranges based on progress
-    const existingRanges = [];
-    const fetchingRanges = [];
-
-    if (details.progress > 0) {
-      const progressDate = new Date(startDate);
-      progressDate.setFullYear(details.year);
-      progressDate.setMonth(details.month - 1);
-
-      // Add fetching range for current progress
-      fetchingRanges.push({
-        start: progressDate,
-        end: new Date(progressDate.getTime() + 24 * 60 * 60 * 1000),
-        progress: details.progress
-      });
-
-      // Add existing range for completed data
-      if (progressDate > startDate) {
-        existingRanges.push({
-          start: startDate,
-          end: progressDate
-        });
-      }
-    }
-
     return (
-      <div className="mt-4">
-        <DataRangeVisualization
-          startDate={startDate}
-          endDate={endDate}
-          existingRanges={existingRanges}
-          fetchingRanges={fetchingRanges}
-        />
+      <div className="mt-4 space-y-2">
+        <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4" />
+            <span>Fetching data for {details.year}</span>
+          </div>
+          <span>{Math.round(details.progress)}%</span>
+        </div>
+        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+          <div
+            className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+            style={{ width: `${details.progress}%` }}
+          />
+        </div>
+        <div className="text-xs text-gray-500 dark:text-gray-400">
+          Processing year {details.year}, month {details.month}
+        </div>
       </div>
     );
   };
@@ -146,7 +127,9 @@ export function ProcessVisualization({ state }: ProcessVisualizationProps) {
                       </div>
                     )}
                     
-                    {renderHistoricalProgress(state.historyProgress)}
+                    {state.status === 'fetching' && state.historyProgress && (
+                      renderHistoricalProgress(state.historyProgress)
+                    )}
                   </div>
                 )}
               </div>

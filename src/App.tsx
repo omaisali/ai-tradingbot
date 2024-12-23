@@ -1,8 +1,6 @@
 import React from 'react';
 import { TradingDashboard } from './components/TradingDashboard';
 
-function App() {
+export default function App() {
   return <TradingDashboard />;
 }
-
-export default App;

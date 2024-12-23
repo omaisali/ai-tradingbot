@@ -1,18 +1,72 @@
 import React, { useState } from 'react';
-import { Key, Lock, Brain } from 'lucide-react';
+import { Key, Lock, Brain, AlertCircle, CheckCircle } from 'lucide-react';
 import { Config } from '../types/config';
+import { validateBinanceCredentials } from '../services/binanceService';
 
 interface ConfigurationPanelProps {
   config: Config;
   onSave: (config: Config) => void;
 }
 
+interface ValidationStatus {
+  isValidating: boolean;
+  isValid: boolean | null;
+  message: string;
+}
+
 export function ConfigurationPanel({ config, onSave }: ConfigurationPanelProps) {
   const [formData, setFormData] = useState(config);
+  const [validationStatus, setValidationStatus] = useState<ValidationStatus>({
+    isValidating: false,
+    isValid: null,
+    message: ''
+  });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(formData);
+    
+    if (!formData.binanceApiKey || !formData.binanceSecretKey) {
+      setValidationStatus({
+        isValidating: false,
+        isValid: false,
+        message: 'Please provide both API key and Secret key'
+      });
+      return;
+    }
+
+    setValidationStatus({
+      isValidating: true,
+      isValid: null,
+      message: 'Validating API keys...'
+    });
+
+    try {
+      const isValid = await validateBinanceCredentials(
+        formData.binanceApiKey,
+        formData.binanceSecretKey
+      );
+
+      if (isValid) {
+        setValidationStatus({
+          isValidating: false,
+          isValid: true,
+          message: 'API keys validated successfully!'
+        });
+        onSave(formData);
+      } else {
+        setValidationStatus({
+          isValidating: false,
+          isValid: false,
+          message: 'Invalid API keys. Please check your credentials.'
+        });
+      }
+    } catch (error) {
+      setValidationStatus({
+        isValidating: false,
+        isValid: false,
+        message: 'Failed to validate API keys. Please try again.'
+      });
+    }
   };
 
   return (
@@ -98,16 +152,38 @@ export function ConfigurationPanel({ config, onSave }: ConfigurationPanelProps) 
           </div>
         </div>
 
+        {validationStatus.message && (
+          <div className={`flex items-center gap-2 p-4 rounded-md ${
+            validationStatus.isValidating ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300' :
+            validationStatus.isValid ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300' :
+            'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
+          }`}>
+            {validationStatus.isValidating ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent" />
+            ) : validationStatus.isValid ? (
+              <CheckCircle className="w-4 h-4" />
+            ) : (
+              <AlertCircle className="w-4 h-4" />
+            )}
+            <p className="text-sm">{validationStatus.message}</p>
+          </div>
+        )}
+
         <div className="flex justify-end pt-4 border-t border-gray-200 dark:border-gray-700">
           <button
             type="submit"
+            disabled={validationStatus.isValidating}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white 
               bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600
               rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500
-              dark:focus:ring-offset-gray-800 transition-colors"
+              dark:focus:ring-offset-gray-800 transition-colors disabled:opacity-50"
           >
-            <Lock className="w-4 h-4" />
-            Save Configuration
+            {validationStatus.isValidating ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+            ) : (
+              <Lock className="w-4 h-4" />
+            )}
+            {validationStatus.isValidating ? 'Validating...' : 'Save Configuration'}
           </button>
         </div>
       </form>

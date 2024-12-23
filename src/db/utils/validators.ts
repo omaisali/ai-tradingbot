@@ -1,6 +1,8 @@
-import type { MarketData, Trade } from '../types';
+import type { MarketData } from '../schema/marketData';
+import type { Trade } from '../schema/trade';
+import { DatabaseValidationError } from '../errors/DatabaseError';
 
-export function validateTimestamp(timestamp: any): number {
+export function validateTimestamp(timestamp: unknown): number {
   if (typeof timestamp === 'number' && !isNaN(timestamp)) {
     return timestamp;
   }
@@ -13,57 +15,50 @@ export function validateTimestamp(timestamp: any): number {
       return parsed;
     }
   }
-  throw new Error('Invalid timestamp: must be a number, Date, or valid date string');
+  throw new DatabaseValidationError('Invalid timestamp: must be a number, Date, or valid date string');
 }
 
-export function validateNumber(value: any, fieldName: string): number {
-  const num = Number(value);
-  if (isNaN(num)) {
-    throw new Error(`Invalid ${fieldName}: must be a valid number`);
-  }
-  return num;
-}
-
-export function validateString(value: any, fieldName: string): string {
-  const str = String(value).trim();
-  if (!str) {
-    throw new Error(`Invalid ${fieldName}: cannot be empty`);
-  }
-  return str;
-}
-
-export function validateMarketData(data: Partial<MarketData>): MarketData {
+export function validateMarketData(data: Partial<MarketData>): Omit<MarketData, 'id'> {
   if (!data) {
-    throw new Error('Market data cannot be null or undefined');
+    throw new DatabaseValidationError('Market data cannot be null or undefined');
+  }
+
+  if (data.timestamp == null || data.symbol == null || data.price == null || data.volume == null) {
+    throw new DatabaseValidationError('Missing required market data fields');
   }
 
   return {
     timestamp: validateTimestamp(data.timestamp),
-    symbol: validateString(data.symbol, 'symbol'),
-    price: validateNumber(data.price, 'price'),
-    volume: validateNumber(data.volume, 'volume'),
-    optimizedParameters: data.optimizedParameters,
-    ...(data.id ? { id: data.id } : {})
+    symbol: String(data.symbol),
+    price: Number(data.price),
+    volume: Number(data.volume),
+    ...(data.optimizedParameters && { optimizedParameters: data.optimizedParameters })
   };
 }
 
-export function validateTrade(data: Partial<Trade>): Trade {
+export function validateTrade(data: Partial<Trade>): Omit<Trade, 'id'> {
   if (!data) {
-    throw new Error('Trade data cannot be null or undefined');
+    throw new DatabaseValidationError('Trade data cannot be null or undefined');
   }
 
-  if (!['BUY', 'SELL'].includes(String(data.type))) {
-    throw new Error('Invalid trade type: must be BUY or SELL');
+  if (data.timestamp == null || data.type == null || data.symbol == null || 
+      data.price == null || data.amount == null || 
+      data.aiRecommendation == null || data.successful == null) {
+    throw new DatabaseValidationError('Missing required trade fields');
+  }
+
+  const type = String(data.type).toUpperCase();
+  if (type !== 'BUY' && type !== 'SELL') {
+    throw new DatabaseValidationError('Invalid trade type: must be BUY or SELL');
   }
 
   return {
     timestamp: validateTimestamp(data.timestamp),
-    type: data.type as 'BUY' | 'SELL',
-    price: validateNumber(data.price, 'price'),
-    amount: validateNumber(data.amount, 'amount'),
-    symbol: validateString(data.symbol, 'symbol'),
-    aiRecommendation: validateString(data.aiRecommendation, 'AI recommendation'),
-    successful: Boolean(data.successful),
-    ...(data.id ? { id: data.id } : {})
+    type: type as 'BUY' | 'SELL',
+    price: Number(data.price),
+    amount: Number(data.amount),
+    symbol: String(data.symbol),
+    aiRecommendation: String(data.aiRecommendation),
+    successful: Boolean(data.successful)
   };
 }
